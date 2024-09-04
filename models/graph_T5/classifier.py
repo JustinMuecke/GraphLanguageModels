@@ -45,7 +45,7 @@ class GraphT5Classifier(PreTrainedModel):
         output = self.t5model(input_ids=input_ids, relative_position=relative_position, sparsity_mask=sparsity_mask, use_additional_bucket=use_additional_bucket)  # (batch_size, seq_len, hidden_size)
         logging.debug('classification head')
         logits = self.classification_head(output[0])  # (batch_size, seq_len, num_classes)
-
+        logits = logits.mean(dim=1)
         return logits
 
     def get_probabilities(self, logits: torch.Tensor) -> torch.Tensor:

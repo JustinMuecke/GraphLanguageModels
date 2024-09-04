@@ -1,0 +1,50 @@
+{
+    "os": "Windows-10-10.0.22631-SP0",
+    "python": "3.10.0",
+    "heartbeatAt": "2024-09-04T08:49:13.640934",
+    "startedAt": "2024-09-04T08:49:13.111868",
+    "docker": null,
+    "cuda": null,
+    "args": [],
+    "state": "running",
+    "program": "C:\\Users\\Doo5i\\git\\GraphLanguageModels\\test.py",
+    "codePath": "test.py",
+    "git": {
+        "remote": "https://github.com/JustinMuecke/GraphLanguageModels.git",
+        "commit": "a7a47d6fc81787ec2b3cbfde2b29f9d495fa3221"
+    },
+    "email": "justin.muecke@gmail.com",
+    "root": "C:/Users/Doo5i/git/GraphLanguageModels",
+    "host": "DESKTOP-FQRD461",
+    "username": "Doo5i",
+    "executable": "C:\\Python\\python.exe",
+    "cpu_count": 14,
+    "cpu_count_logical": 20,
+    "cpu_freq": {
+        "current": 3500.0,
+        "min": 0.0,
+        "max": 3500.0
+    },
+    "cpu_freq_per_core": [
+        {
+            "current": 3500.0,
+            "min": 0.0,
+            "max": 3500.0
+        }
+    ],
+    "disk": {
+        "total": 464.997745513916,
+        "used": 386.3052749633789
+    },
+    "gpu": "NVIDIA GeForce RTX 2060",
+    "gpu_count": 1,
+    "gpu_devices": [
+        {
+            "name": "NVIDIA GeForce RTX 2060",
+            "memory_total": 6442450944
+        }
+    ],
+    "memory": {
+        "total": 63.85531234741211
+    }
+}

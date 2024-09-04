@@ -1,0 +1,148 @@
+ObjectProperty: hasAncestor
+    Characteristics: 
+        Transitive
+    
+    
+ObjectProperty: hasChild
+
+    
+ObjectProperty: hasGrandChild
+
+    
+ObjectProperty: hasSex
+
+    
+Class: Child   
+    SubClassOf: 
+        Person
+    
+
+Class: Father    
+    EquivalentTo: 
+        Male
+         and Parent
+    
+    SubClassOf: 
+        Parent
+    DisjointWith: 
+        Mother
+    
+    
+Class: Female   
+    SubClassOf: 
+        Sex
+    
+    
+Class: GrandParent
+    
+    EquivalentTo: 
+        hasChild some (hasChild some Child),
+        hasGrandChild some Child
+    
+    SubClassOf: 
+        Person
+    
+    
+Class: Male
+    
+    SubClassOf: 
+        Sex
+    
+    
+Class: Mother    
+    EquivalentTo: 
+        Female
+         and Parent
+    SubClassOf: 
+        Parent
+    DisjointWith: 
+        Father
+    
+    
+Class: Parent    
+    EquivalentTo: 
+        hasChild some Person
+    SubClassOf: 
+        Person
+    
+    
+Class: Person
+   
+    
+Class: PureGrandParent
+   
+    EquivalentTo: 
+        hasChild only (hasChild some Child)
+    
+    SubClassOf: 
+        Person
+    
+    
+Class: Sex
+
+    
+    
+Individual: Annika
+
+    Types: 
+        Child
+    
+    Facts:  
+     hasAncestor  Hanna,
+     hasAncestor  Justin
+    
+    
+Individual: Hanna
+
+    Types: 
+        Female,
+        Parent
+    
+    Facts:  
+     hasChild  Annika
+    
+    
+Individual: Justin
+
+    Types: 
+        Male
+    
+    Facts:  
+     hasAncestor  Rolt,
+     hasChild  Annika
+    
+    
+Individual: Marc
+
+    Facts:  
+     hasAncestor  Pascal
+    
+    
+Individual: Niklas
+
+    Facts:  
+     hasAncestor  Pascal,
+     hasChild  Olga
+    
+    
+Individual: Olga
+
+    Types: 
+        Child
+    
+    Facts:  
+     hasAncestor  Niklas
+    
+    
+Individual: Pascal
+
+    Facts:  
+     hasChild  Marc,
+     hasChild  Niklas
+    
+    
+Individual: Rolt
+    Types: 
+        Parent
+    Facts:  
+     hasChild  Justin
