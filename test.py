@@ -277,8 +277,11 @@ def load_data(kg, dataset_construction, radius, num_masked):
     print(iterate)
     for (split, fn) in iterate:
         triple_list = json.load(fn.open("r"))
+        total_words = sum(len(word.split()) for sublist in triple_list for word in sublist)
         print(triple_list)
+        print(f"Number of Words: {total_words}")
         graphs = {split : [Graph(triple_list)]}
+        
 
 
 
@@ -460,14 +463,7 @@ def main(args):
 
     logging.info('load data')
     graphs, labels, label_to_index = load_data(kg=args.kg, dataset_construction=args.dataset_construction, radius=args.radius, num_masked=args.num_masked)
-
-    print(graphs)
-    print(labels)
-    print(label_to_index)
-
-  
-
-
+    
     logging.info('load T5 encoder')
     num_classes = len(label_to_index)
     
@@ -500,6 +496,15 @@ def main(args):
     best_test_loss = float('inf')
     stopped_early = False
 
+    print("GRAPH")
+    print(graphs)
+    print(labels)
+    print(label_to_index)
+    data = [data_to_dataT5(graph, model.tokenizer, label, label_to_index, args.graph_representation, eos=args.eos_usage) for graph, label in zip(graphs["test"], labels["test"])]
+    for datapoint in data:
+        print(datapoint.input_ids.shape)
+
+    return
     logging.info('train the model')
     for epoch in range(args.num_epochs):
         if args.reload_data:
