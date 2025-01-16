@@ -29,10 +29,10 @@ def load_data(kg, dataset_construction, radius, num_masked):
 
     df = pd.read_csv("dataset.csv", header=0, nrows=10)
     subset_df = df[df["tokenized_length"] < MAX_LENGTH]
-    df["labels"] = df["file_name"].map(lambda x : "Inconsistent" if x.split("_")[0] in PREFIXES else "Consistent")
-    data = df["body"].map(lambda x : x.replace(" ", "").replace("\'", "\"")).tolist()
+    subset_df["labels"] = subset_df["file_name"].map(lambda x : "Inconsistent" if x.split("_")[0] in PREFIXES else "Consistent")
+    data = subset_df["body"].map(lambda x : x.replace(" ", "").replace("\'", "\"")).tolist()
  
-    all_labels = df["labels"].tolist()
+    all_labels = subset_df["labels"].tolist()
     labels = []
     graphs = []
     for triples, label in tqdm(zip(data, all_labels)):
@@ -99,7 +99,8 @@ def get_batch(data_instances:List[Data], pad_token_id:int, device:str):
         assert data_instances[0].sparsity_mask is not None
         assert data_instances[0].use_additional_bucket is not None
         is_sequence_transformer = False
-
+    print(f"data_instances: {len(data_instances)}")
+    print(f"max sequence length: {max_seq_len}")
     # intialize tensors
     input_ids = torch.ones((len(data_instances), max_seq_len), dtype=torch.long, device=device) * pad_token_id
     if not is_sequence_transformer:
@@ -109,7 +110,9 @@ def get_batch(data_instances:List[Data], pad_token_id:int, device:str):
 
     # fill tensors
     for i, data in enumerate(data_instances):
+        data.input_ids = data.input_ids.to(device)
         input_ids[i, :data.input_ids.shape[1]] = data.input_ids
+        input_ids = input_ids.to(device)
         if not is_sequence_transformer:
             relative_position[i, :data.relative_position.shape[1], :data.relative_position.shape[2]] = data.relative_position
             sparsity_mask[i, :data.sparsity_mask.shape[1], :data.sparsity_mask.shape[2]] = data.sparsity_mask
@@ -158,10 +161,6 @@ def run_eval_epoch(model:GraphT5Classifier, data:List[Data], criterion:nn.Module
             )
 
             logging.debug("get embedding")
-            logits = torch.cat([
-                get_embedding(sequence_embedding=logits[i], indices=indices[i], concept='<mask>', embedding_aggregation='mean')
-                for i in range(len(data_instances))
-            ], dim=0)
 
             logging.debug("get loss and accuracy")
             loss = criterion(logits, label)
@@ -177,6 +176,8 @@ def run_eval_epoch(model:GraphT5Classifier, data:List[Data], criterion:nn.Module
     return loss, accuracy
 
 def run_train_epoch(model:GraphT5Classifier, data:List[Data], criterion:nn.Module, optimizer:torch.optim.Optimizer, batch_size:int, gradient_accumulation_steps:int, device:str):
+    print("running train epochs")
+
     losses = []
     accuracies = []
     weights = []
@@ -187,18 +188,15 @@ def run_train_epoch(model:GraphT5Classifier, data:List[Data], criterion:nn.Modul
     for i, data_instances in tqdm(enumerate(chunker(data, batch_size)), total=len(data)//batch_size):
         # create batch
         input_ids, relative_position, sparsity_mask, use_additional_bucket, indices, label = get_batch(data_instances, pad_token_id=model.tokenizer.pad_token_id, device=device)
-
+        print(f"Input Shape: {input_ids.shape}")
+        print(batch_size)
         logits = model.forward(
-            input_ids=input_ids,
-            relative_position=relative_position,
-            sparsity_mask=sparsity_mask,
-            use_additional_bucket=use_additional_bucket,
+            input_ids=input_ids.to(device),
+            relative_position=relative_position.to(device),
+            sparsity_mask=sparsity_mask.to(device),
+            use_additional_bucket=use_additional_bucket.to(device),
         )
 
-        logits = torch.cat([
-            get_embedding(sequence_embedding=logits[i], indices=indices[i], concept='<mask>', embedding_aggregation='mean')
-            for i in range(len(data_instances))
-        ], dim=0)
 
         loss = criterion(logits, label)
         # loss = logits.sum()
@@ -244,7 +242,7 @@ def main(args):
     if args.reset_params:
         logging.info('resetting model parameters')
         get_args.reset_params(model=model)
-    #model.to(args.device)
+    model.to(args.device)
 
     if not args.reload_data:
         logging.info('convert data to T5 input')
