@@ -21,18 +21,34 @@ from models.graph_T5.wrapper_functions import Graph, graph_to_graphT5, graph_to_
 PREFIXES : List[str] = ["AIO","EID","OIL","OILWI","OILWPI","UE","UEWI1","UEWI2","UEWPI","UEWIP","SOSINETO","CSC","OOR","OOD"]
 MAX_LENGTH = 512
 
-def load_data(kg, dataset_construction, radius, num_masked):
-    #splits = ['train', 'dev', 'test']
-    #fn_graphs = [Path(f"data/knowledgegraph/{kg}/relation_subgraphs_{dataset_construction}/num_neighbors=[1,2,2,2,2]/num_masked={num_masked}/radius={radius}/{split}_graphs.jsonl") for split in splits]
-    #fn_labels = [Path(f"data/knowledgegraph/{kg}/relation_subgraphs_{dataset_construction}/num_neighbors=[1,2,2,2,2]/num_masked={num_masked}/radius={radius}/{split}_labels.jsonl") for split in splits]
-    #fn_label2index = Path(f"data/knowledgegraph/{kg}/relation_subgraphs_{dataset_construction}/num_neighbors=[1,2,2,2,2]/label2index.json")
-
-    df = pd.read_csv("dataset.csv", header=0, nrows=10)
+def load_data():
+    
+    df = pd.read_csv("dataset.csv", header=0)
     subset_df = df[df["tokenized_length"] < MAX_LENGTH]
+
+    ## Filter data by token length
     subset_df["labels"] = subset_df["file_name"].map(lambda x : "Inconsistent" if x.split("_")[0] in PREFIXES else "Consistent")
-    data = subset_df["body"].map(lambda x : x.replace(" ", "").replace("\'", "\"")).tolist()
  
-    all_labels = subset_df["labels"].tolist()
+    ## Check how many consistent data points there are
+    consistent_data = subset_df.loc(subset_df["labels"] == "Consistent")
+    posistive_training_examples = len(consistent_data)
+    print(f"posistive training examples: {posistive_training_examples}")
+
+    ## Check how many consistent data points there are
+    inconsistent_data = subset_df.loc(subset_df["labels"] == "Inconsistent")
+    inconsistent_data = inconsistent_data.sample(frac=1).reset_index(drop=True)
+    inconsistent_data = inconsistent_data[:posistive_training_examples]
+    print(f"negative training examples: {len(inconsistent_data)}")
+
+    ## Combine into one train/test set
+    combined_data = pd.concat([consistent_data, inconsistent_data], ignore_index=True)
+    combined_data = combined_data.sample(frac=1).reset_index(drop=True)
+    combined_data.to_csv("Training_data.csv", index=False)
+
+    ## Load as Graph data
+    data = combined_data["body"].map(lambda x : x.replace(" ", "").replace("\'", "\"")).tolist()
+
+    all_labels = combined_data["labels"].tolist()
     labels = []
     graphs = []
     for triples, label in tqdm(zip(data, all_labels)):
@@ -46,19 +62,12 @@ def load_data(kg, dataset_construction, radius, num_masked):
                 print("Sh")
                 jsonified = jsonified[:-1]
                 continue 
-    #graphs = [Graph(json.loads(triples)) for triples in data]
-
-    #
-    #graphs = {split: [Graph(json.loads(l)) for l in tqdm(fn.open('r'))] for split, fn in zip(splits, fn_graphs)}
-#
-#    labels = {split: fn.open('r').readlines() for split, fn in zip(splits, fn_labels)}
-#    for split in splits:
-#        labels[split] = [l.strip() for l in labels[split] if l.strip()]
-#
+   
     label_to_index = {"Inconsistent" : 1, "Consistent" : 0}
-##  
-    graph_dict = {"train": graphs[:int(0.7*len(graphs))], "test": graphs[int(0.7*len(graphs)):]}
-    label_dict = {"train" : labels[:int(0.7*len(labels))], "test": labels[int(0.7*len((labels))):]}
+
+    ## Split dataset 
+    graph_dict = {"train": graphs[:int(0.7*len(graphs))], "test": graphs[int(0.7*len(graphs)):int(0.85*len(graphs))], "eval" : graphs[int(0.85*len(graphs)):]}
+    label_dict = {"train" : labels[:int(0.7*len(labels))], "test": labels[int(0.7*len((labels))):int(0.85*len((labels)))], "eval": labels[int(0.85*len((labels))):]}
 
 #    assert set(labels['train']) == set(labels['dev']) == set(labels['test']), (set(labels['train']), set(labels['dev']), set(labels['test']))
     return graph_dict, label_dict, label_to_index
@@ -229,7 +238,7 @@ def main(args):
         torch.manual_seed(args.seed)
 
     logging.info('load data')
-    graphs, labels, label_to_index = load_data(kg=args.kg, dataset_construction=args.dataset_construction, radius=args.radius, num_masked=args.num_masked)
+    graphs, labels, label_to_index = load_data()
     
     logging.info('load T5 encoder')
     num_classes = len(label_to_index)
@@ -257,8 +266,8 @@ def main(args):
     optimizer = args.optimizer(model.parameters(), lr=args.learning_rate)
 
     best_epoch = 0
-    best_dev_accuracy = 0
-    best_dev_loss = float('inf')
+    best_eval_accuracy = 0
+    best_eval_loss = float('inf')
     best_test_accuracy = 0
     best_test_loss = float('inf')
     stopped_early = False
@@ -268,25 +277,25 @@ def main(args):
     for epoch in range(args.num_epochs):
         if args.reload_data:
             logging.info('convert data to T5 input')
-            data = {split: [data_to_dataT5(graph, model.tokenizer, label, label_to_index, args.graph_representation, eos=args.eos_usage) for graph, label in tqdm(zip(graphs[split], labels[split]), total=len(labels[split]))] for split in ['train', 'test']}
+            data = {split: [data_to_dataT5(graph, model.tokenizer, label, label_to_index, args.graph_representation, eos=args.eos_usage) for graph, label in tqdm(zip(graphs[split], labels[split]), total=len(labels[split]))] for split in ['train', 'test', 'eval']}
             logging.info('train epoch')
         train_loss, train_accuracy = run_train_epoch(model=model, data=data['train'], criterion=criterion, optimizer=optimizer, batch_size=args.train_batch_size, gradient_accumulation_steps=args.gradient_accumulation_steps, device=args.device)
         logging.info(f'train - {epoch = } # {train_loss = :.2f} # {train_accuracy = :.2f}')
 
         # get dev scores
- #       dev_loss, dev_accuracy = run_eval_epoch(model=model, data=data['dev'], criterion=criterion, batch_size=args.eval_batch_size, device=args.device)
- #       logging.info(f'dev   - {epoch = } # {dev_loss = :.2f} # {dev_accuracy = :.2f}')
+        eval_loss, eval_accuracy = run_eval_epoch(model=model, data=data['eval'], criterion=criterion, batch_size=args.eval_batch_size, device=args.device)
+        logging.info(f'dev   - {epoch = } # {eval_loss = :.2f} # {eval_accuracy = :.2f}')
 
         # get test scores
         test_loss, test_accuracy = run_eval_epoch(model=model, data=data['test'], criterion=criterion, batch_size=args.eval_batch_size, device=args.device)
         logging.info(f'test  - {epoch = } # {test_loss = :.2f} # {test_accuracy = :.2f}')
 
-        if train_loss < best_dev_loss:
+        if eval_loss < best_eval_loss:
             best_epoch = epoch
-            best_dev_accuracy = train_accuracy
-            best_dev_loss = train_loss
-            best_test_accuracy = train_accuracy
-            best_test_loss = train_loss
+            best_eval_accuracy = eval_accuracy
+            best_eval_loss = eval_loss
+            best_eval_accuracy = eval_accuracy
+            best_eval_loss = eval_loss
 
         wandb.log(
             {
@@ -294,7 +303,7 @@ def main(args):
                 "best_epoch": best_epoch,
                 "stopped_early": float(stopped_early),
                 "train/accuracy": train_accuracy, "train/loss": train_loss, 
- #               "dev/accuracy": dev_accuracy, "dev/loss": dev_loss, 'dev/best_accuracy': best_dev_accuracy, 'dev/best_loss': best_dev_loss,
+                "eval/accuracy": eval_accuracy, "eval/loss": eval_loss, 'eval/best_accuracy': best_eval_accuracy, 'dev/best_loss': best_eval_loss,
                 "test/accuracy": test_accuracy, "test/loss": test_loss, 'test/best_accuracy': best_test_accuracy, 'test/best_loss': best_test_loss,
             }
         )
