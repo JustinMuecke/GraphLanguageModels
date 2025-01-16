@@ -5,7 +5,7 @@ from typing import List, Tuple, Dict, Union, Optional
 from itertools import chain
 import random
 
-from models.graph_T5.graph_t5 import T5Tokenizer
+from models.graph_T5.graph_t5 import T5TokenizerFast
 from models.graph_T5.graph_t5.modeling_t5 import T5Attention
 import models.graph_T5.graph_t5.modeling_t5
 
@@ -225,7 +225,7 @@ def r2nl(r: str) -> str:
     else:
         return r
 
-def _get_str2tok(g:Graph, tokenizer: T5Tokenizer) -> dict[str, list[int]]:
+def _get_str2tok(g:Graph, tokenizer: T5TokenizerFast) -> dict[str, list[int]]:
     """
     Get a dictionary that maps strings to tokens.
     """
@@ -415,7 +415,7 @@ def _get_global_graphT5_relativeposition_sparsitymask(g:Graph, indices:dict, seq
     use_additional_bucket = use_additional_bucket.unsqueeze(0)  # add batch dimension
     return relative_position, sparsity_mask, use_additional_bucket
 
-def graph_to_graphT5(g: Graph, tokenizer: T5Tokenizer, how:str, eos:str)->Data:
+def graph_to_graphT5(g: Graph, tokenizer: T5TokenizerFast, how:str, eos:str)->Data:
     """
     Convert a graph to a graphT5 input.
     :param g: graph
@@ -486,7 +486,7 @@ def _get_set_of_triplets_input_sequence(g:Graph, str2tok:dict, order:str) -> Tup
     is_concept = is_concept.unsqueeze(0)  # add batch dimension
     return sequence, indices, is_concept, concept_indices
 
-def graph_to_set_of_triplets(g:Graph, tokenizer:T5Tokenizer, order:str='random')->Data:
+def graph_to_set_of_triplets(g:Graph, tokenizer:T5TokenizerFast, order:str='random')->Data:
     """
     Convert graph to a T5 input where graph as represented as a set of triplets. Triplets are separated by </s>.
     :param g: graph

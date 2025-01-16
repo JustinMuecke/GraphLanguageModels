@@ -5,7 +5,6 @@ import json
 from tqdm import tqdm
 import torch
 from torch import nn
-from torch import optim
 from typing import List, Tuple, Dict, Union, Optional, Generator
 import random
 import numpy as np
@@ -13,30 +12,54 @@ import sys
 import os, sys
 import logging
 import wandb
-
-from experiments.seq_classification import get_args
+import pandas as pd
+import get_args
 from models.graph_T5.classifier import GraphT5Classifier
 from models.graph_T5.graph_t5 import T5TokenizerFast as T5Tokenizer
 from models.graph_T5.wrapper_functions import Graph, graph_to_graphT5, graph_to_set_of_triplets, get_embedding, Data
 
+PREFIXES : List[str] = ["AIO","EID","OIL","OILWI","OILWPI","UE","UEWI1","UEWI2","UEWPI","UEWIP","SOSINETO","CSC","OOR","OOD"]
+MAX_LENGTH = 512
 
 def load_data(kg, dataset_construction, radius, num_masked):
-    splits = ['train', 'dev', 'test']
-    fn_graphs = [Path(f"data/knowledgegraph/{kg}/relation_subgraphs_{dataset_construction}/num_neighbors=[1,2,2,2,2]/num_masked={num_masked}/radius={radius}/{split}_graphs.jsonl") for split in splits]
-    fn_labels = [Path(f"data/knowledgegraph/{kg}/relation_subgraphs_{dataset_construction}/num_neighbors=[1,2,2,2,2]/num_masked={num_masked}/radius={radius}/{split}_labels.jsonl") for split in splits]
-    fn_label2index = Path(f"data/knowledgegraph/{kg}/relation_subgraphs_{dataset_construction}/num_neighbors=[1,2,2,2,2]/label2index.json")
+    #splits = ['train', 'dev', 'test']
+    #fn_graphs = [Path(f"data/knowledgegraph/{kg}/relation_subgraphs_{dataset_construction}/num_neighbors=[1,2,2,2,2]/num_masked={num_masked}/radius={radius}/{split}_graphs.jsonl") for split in splits]
+    #fn_labels = [Path(f"data/knowledgegraph/{kg}/relation_subgraphs_{dataset_construction}/num_neighbors=[1,2,2,2,2]/num_masked={num_masked}/radius={radius}/{split}_labels.jsonl") for split in splits]
+    #fn_label2index = Path(f"data/knowledgegraph/{kg}/relation_subgraphs_{dataset_construction}/num_neighbors=[1,2,2,2,2]/label2index.json")
 
-    graphs = {split: [Graph(json.loads(l)) for l in tqdm(fn.open('r'))] for split, fn in zip(splits, fn_graphs)}
+    df = pd.read_csv("dataset.csv", header=0, nrows=2)
+    subset_df = df[df["tokenized_length"] < MAX_LENGTH]
+    df["labels"] = df["file_name"].map(lambda x : "Inconsistent" if x.split("_")[0] in PREFIXES else "Consistent")
+    data = df["body"].map(lambda x : x.replace(" ", "").replace("\'", "\"")).tolist()
+ 
+    all_labels = df["labels"].tolist()
+    labels = []
+    graphs = []
+    for triples, label in zip(data, all_labels):
+        jsonified = json.loads(triples)
+        while jsonified:
+            try:
+                graphs.append(Graph(jsonified))
+                labels.append(label)
+            except: 
+                jsonified = jsonified[:-1]
+                continue 
+    #graphs = [Graph(json.loads(triples)) for triples in data]
 
-    labels = {split: fn.open('r').readlines() for split, fn in zip(splits, fn_labels)}
-    for split in splits:
-        labels[split] = [l.strip() for l in labels[split] if l.strip()]
+    #
+    #graphs = {split: [Graph(json.loads(l)) for l in tqdm(fn.open('r'))] for split, fn in zip(splits, fn_graphs)}
+#
+#    labels = {split: fn.open('r').readlines() for split, fn in zip(splits, fn_labels)}
+#    for split in splits:
+#        labels[split] = [l.strip() for l in labels[split] if l.strip()]
+#
+    label_to_index = {"Inconsistent" : 1, "Consistent" : 0}
+##  
+    graph_dict = {"train": graphs[:0.7*len(graphs)], "test": graphs[0.7*len(graphs):]}
+    label_dict = {"train" : labels[:0.7*len(labels)], "test": labels[0.7*len(labels):]}
 
-    label_to_index = json.load(fn_label2index.open('r'))
-
-    assert set(labels['train']) == set(labels['dev']) == set(labels['test']), (set(labels['train']), set(labels['dev']), set(labels['test']))
-
-    return graphs, labels, label_to_index
+#    assert set(labels['train']) == set(labels['dev']) == set(labels['test']), (set(labels['train']), set(labels['dev']), set(labels['test']))
+    return graph_dict, label_dict, label_to_index
 
 def data_to_dataT5(graph:Graph, tokenizer:T5Tokenizer, label:str, label_to_index:dict, graph_representation:str, eos:str):
     """
@@ -207,11 +230,12 @@ def main(args):
 
     logging.info('load data')
     graphs, labels, label_to_index = load_data(kg=args.kg, dataset_construction=args.dataset_construction, radius=args.radius, num_masked=args.num_masked)
-
+    
     logging.info('load T5 encoder')
     num_classes = len(label_to_index)
-    
+    print(num_classes)
     model = GraphT5Classifier(config=GraphT5Classifier.get_config(num_classes=num_classes, modelsize=args.modelsize, num_additional_buckets=args.num_additional_buckets))
+    
     if args.num_additional_buckets != 0:
         logging.info(f'init relative position bias with {args.num_additional_buckets} additional buckets')
         model.t5model.init_relative_position_bias(modelsize=args.modelsize, init_decoder=False, init_additional_buckets_from=args.init_additional_buckets_from)
@@ -240,6 +264,7 @@ def main(args):
     best_test_loss = float('inf')
     stopped_early = False
 
+    "Training "
     logging.info('train the model')
     for epoch in range(args.num_epochs):
         if args.reload_data:
@@ -250,19 +275,19 @@ def main(args):
         logging.info(f'train - {epoch = } # {train_loss = :.2f} # {train_accuracy = :.2f}')
 
         # get dev scores
-        dev_loss, dev_accuracy = run_eval_epoch(model=model, data=data['dev'], criterion=criterion, batch_size=args.eval_batch_size, device=args.device)
-        logging.info(f'dev   - {epoch = } # {dev_loss = :.2f} # {dev_accuracy = :.2f}')
+ #       dev_loss, dev_accuracy = run_eval_epoch(model=model, data=data['dev'], criterion=criterion, batch_size=args.eval_batch_size, device=args.device)
+ #       logging.info(f'dev   - {epoch = } # {dev_loss = :.2f} # {dev_accuracy = :.2f}')
 
         # get test scores
-        test_loss, test_accuracy = run_eval_epoch(model=model, data=data['test'], criterion=criterion, batch_size=args.eval_batch_size, device=args.device)
-        logging.info(f'test  - {epoch = } # {test_loss = :.2f} # {test_accuracy = :.2f}')
+ #       test_loss, test_accuracy = run_eval_epoch(model=model, data=data['test'], criterion=criterion, batch_size=args.eval_batch_size, device=args.device)
+ #       logging.info(f'test  - {epoch = } # {test_loss = :.2f} # {test_accuracy = :.2f}')
 
-        if dev_loss < best_dev_loss:
+        if train_loss < best_dev_loss:
             best_epoch = epoch
-            best_dev_accuracy = dev_accuracy
-            best_dev_loss = dev_loss
-            best_test_accuracy = test_accuracy
-            best_test_loss = test_loss
+            best_dev_accuracy = train_accuracy
+            best_dev_loss = train_loss
+            best_test_accuracy = train_accuracy
+            best_test_loss = train_loss
 
         wandb.log(
             {
@@ -327,7 +352,6 @@ if __name__ == "__main__":
         mode=args.wandb_mode,
         project="GLM-link_prediction-long_train",
         name=name,
-        magic=True,
         # Track hyperparameters and run metadata
         config=args.__dict__,
         group=f'{name}_lr={args.learning_rate}_resetparams={args.reset_params}_modelsize={args.modelsize}_eos={args.eos_usage}',
