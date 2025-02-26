@@ -27,23 +27,16 @@ def load_data(kg, dataset_construction, radius, num_masked):
     #fn_labels = [Path(f"data/knowledgegraph/{kg}/relation_subgraphs_{dataset_construction}/num_neighbors=[1,2,2,2,2]/num_masked={num_masked}/radius={radius}/{split}_labels.jsonl") for split in splits]
     #fn_label2index = Path(f"data/knowledgegraph/{kg}/relation_subgraphs_{dataset_construction}/num_neighbors=[1,2,2,2,2]/label2index.json")
 
-    df = pd.read_csv("dataset.csv", header=0, nrows=2)
-    subset_df = df[df["tokenized_length"] < MAX_LENGTH]
-    df["labels"] = df["file_name"].map(lambda x : "Inconsistent" if x.split("_")[0] in PREFIXES else "Consistent")
-    data = df["body"].map(lambda x : x.replace(" ", "").replace("\'", "\"")).tolist()
- 
-    all_labels = df["labels"].tolist()
-    labels = []
-    graphs = []
-    for triples, label in zip(data, all_labels):
-        jsonified = json.loads(triples)
-        while jsonified:
-            try:
-                graphs.append(Graph(jsonified))
-                labels.append(label)
-            except: 
-                jsonified = jsonified[:-1]
-                continue 
+    train_df = pd.read_csv("../train_data.csv", header=0)
+    eval_df = pd.read_csv("../eval_data.csv", header=0)
+    test_df = pd.read_csv("../test_data.csv", header=0)
+    
+
+
+    train_graphs = [Graph(json.load(triples)) for triples in train_df["body"]]
+    eval_graphs = [Graph(json.load(triples))for triples in eval_df["body"]]
+    test_graphs = [Graph(json.load(triples))for triples in test_df["body"]]
+
     #graphs = [Graph(json.loads(triples)) for triples in data]
 
     #
