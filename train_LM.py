@@ -46,10 +46,53 @@ def load_data(kg, dataset_construction, radius, num_masked):
 #    for split in splits:
 #        labels[split] = [l.strip() for l in labels[split] if l.strip()]
 #
+def load_data():
+    
+    df = pd.read_csv("dataset.csv", header=0)
+    subset_df = df[df["tokenized_length"] < MAX_LENGTH]
+
+    ## Filter data by token length
+    subset_df["labels"] = subset_df["file_name"].map(lambda x : "Inconsistent" if x.split("_")[0] in PREFIXES else "Consistent")
+ 
+    ## Check how many consistent data points there are
+    consistent_data = subset_df.loc(subset_df["labels"] == "Consistent")
+    posistive_training_examples = len(consistent_data)
+    print(f"posistive training examples: {posistive_training_examples}")
+
+    ## Check how many consistent data points there are
+    inconsistent_data = subset_df.loc(subset_df["labels"] == "Inconsistent")
+    inconsistent_data = inconsistent_data.sample(frac=1).reset_index(drop=True)
+    inconsistent_data = inconsistent_data[:posistive_training_examples]
+    print(f"negative training examples: {len(inconsistent_data)}")
+
+    ## Combine into one train/test set
+    combined_data = pd.concat([consistent_data, inconsistent_data], ignore_index=True)
+    combined_data = combined_data.sample(frac=1).reset_index(drop=True)
+    combined_data.to_csv("Training_data.csv", index=False)
+
+    ## Load as Graph data
+    data = combined_data["body"].map(lambda x : x.replace(" ", "").replace("\'", "\"")).tolist()
+
+    all_labels = combined_data["labels"].tolist()
+    labels = []
+    graphs = []
+    for triples, label in tqdm(zip(data, all_labels)):
+        jsonified = json.loads(triples)
+        while jsonified:
+            try:
+                graphs.append(Graph(jsonified))
+                labels.append(label)
+                break
+            except: 
+                print("Sh")
+                jsonified = jsonified[:-1]
+                continue 
+   
     label_to_index = {"Inconsistent" : 1, "Consistent" : 0}
-##  
-    graph_dict = {"train": graphs[:0.7*len(graphs)], "test": graphs[0.7*len(graphs):]}
-    label_dict = {"train" : labels[:0.7*len(labels)], "test": labels[0.7*len(labels):]}
+
+    ## Split dataset 
+    graph_dict = {"train": graphs[:int(0.7*len(graphs))], "test": graphs[int(0.7*len(graphs)):int(0.85*len(graphs))], "eval" : graphs[int(0.85*len(graphs)):]}
+    label_dict = {"train" : labels[:int(0.7*len(labels))], "test": labels[int(0.7*len((labels))):int(0.85*len((labels)))], "eval": labels[int(0.85*len((labels))):]}
 
 #    assert set(labels['train']) == set(labels['dev']) == set(labels['test']), (set(labels['train']), set(labels['dev']), set(labels['test']))
     return graph_dict, label_dict, label_to_index
@@ -90,7 +133,8 @@ def get_batch(data_instances:List[Data], pad_token_id:int, device:str):
         assert data_instances[0].sparsity_mask is not None
         assert data_instances[0].use_additional_bucket is not None
         is_sequence_transformer = False
-
+    print(f"data_instances: {len(data_instances)}")
+    print(f"max sequence length: {max_seq_len}")
     # intialize tensors
     input_ids = torch.ones((len(data_instances), max_seq_len), dtype=torch.long, device=device) * pad_token_id
     if not is_sequence_transformer:
@@ -100,7 +144,9 @@ def get_batch(data_instances:List[Data], pad_token_id:int, device:str):
 
     # fill tensors
     for i, data in enumerate(data_instances):
+        data.input_ids = data.input_ids.to(device)
         input_ids[i, :data.input_ids.shape[1]] = data.input_ids
+        input_ids = input_ids.to(device)
         if not is_sequence_transformer:
             relative_position[i, :data.relative_position.shape[1], :data.relative_position.shape[2]] = data.relative_position
             sparsity_mask[i, :data.sparsity_mask.shape[1], :data.sparsity_mask.shape[2]] = data.sparsity_mask
@@ -149,10 +195,6 @@ def run_eval_epoch(model:GraphT5Classifier, data:List[Data], criterion:nn.Module
             )
 
             logging.debug("get embedding")
-            logits = torch.cat([
-                get_embedding(sequence_embedding=logits[i], indices=indices[i], concept='<mask>', embedding_aggregation='mean')
-                for i in range(len(data_instances))
-            ], dim=0)
 
             logging.debug("get loss and accuracy")
             loss = criterion(logits, label)
@@ -168,6 +210,8 @@ def run_eval_epoch(model:GraphT5Classifier, data:List[Data], criterion:nn.Module
     return loss, accuracy
 
 def run_train_epoch(model:GraphT5Classifier, data:List[Data], criterion:nn.Module, optimizer:torch.optim.Optimizer, batch_size:int, gradient_accumulation_steps:int, device:str):
+    print("running train epochs")
+
     losses = []
     accuracies = []
     weights = []
@@ -178,18 +222,15 @@ def run_train_epoch(model:GraphT5Classifier, data:List[Data], criterion:nn.Modul
     for i, data_instances in tqdm(enumerate(chunker(data, batch_size)), total=len(data)//batch_size):
         # create batch
         input_ids, relative_position, sparsity_mask, use_additional_bucket, indices, label = get_batch(data_instances, pad_token_id=model.tokenizer.pad_token_id, device=device)
-
+        print(f"Input Shape: {input_ids.shape}")
+        print(batch_size)
         logits = model.forward(
-            input_ids=input_ids,
-            relative_position=relative_position,
-            sparsity_mask=sparsity_mask,
-            use_additional_bucket=use_additional_bucket,
+            input_ids=input_ids.to(device),
+            relative_position=relative_position.to(device),
+            sparsity_mask=sparsity_mask.to(device),
+            use_additional_bucket=use_additional_bucket.to(device),
         )
 
-        logits = torch.cat([
-            get_embedding(sequence_embedding=logits[i], indices=indices[i], concept='<mask>', embedding_aggregation='mean')
-            for i in range(len(data_instances))
-        ], dim=0)
 
         loss = criterion(logits, label)
         # loss = logits.sum()
@@ -222,11 +263,10 @@ def main(args):
         torch.manual_seed(args.seed)
 
     logging.info('load data')
-    graphs, labels, label_to_index = load_data(kg=args.kg, dataset_construction=args.dataset_construction, radius=args.radius, num_masked=args.num_masked)
+    graphs, labels, label_to_index = load_data()
     
     logging.info('load T5 encoder')
     num_classes = len(label_to_index)
-    print(num_classes)
     model = GraphT5Classifier(config=GraphT5Classifier.get_config(num_classes=num_classes, modelsize=args.modelsize, num_additional_buckets=args.num_additional_buckets))
     
     if args.num_additional_buckets != 0:
@@ -240,7 +280,7 @@ def main(args):
 
     if not args.reload_data:
         logging.info('convert data to T5 input')
-        data = {split: [data_to_dataT5(graph, model.tokenizer, label, label_to_index, args.graph_representation, eos=args.eos_usage) for graph, label in tqdm(zip(graphs[split], labels[split]), total=len(labels[split]))] for split in ['train', 'dev', 'test']}
+        data = {split: [data_to_dataT5(graph, model.tokenizer, label, label_to_index, args.graph_representation, eos=args.eos_usage) for graph, label in tqdm(zip(graphs[split], labels[split]), total=len(labels[split]))] for split in ['train', 'test']}
 
     # loss and optimizer
     criterion = args.criterion()
@@ -251,8 +291,8 @@ def main(args):
     optimizer = args.optimizer(model.parameters(), lr=args.learning_rate)
 
     best_epoch = 0
-    best_dev_accuracy = 0
-    best_dev_loss = float('inf')
+    best_eval_accuracy = 0
+    best_eval_loss = float('inf')
     best_test_accuracy = 0
     best_test_loss = float('inf')
     stopped_early = False
@@ -262,25 +302,25 @@ def main(args):
     for epoch in range(args.num_epochs):
         if args.reload_data:
             logging.info('convert data to T5 input')
-            data = {split: [data_to_dataT5(graph, model.tokenizer, label, label_to_index, args.graph_representation, eos=args.eos_usage) for graph, label in tqdm(zip(graphs[split], labels[split]), total=len(labels[split]))] for split in ['train', 'dev', 'test']}
+            data = {split: [data_to_dataT5(graph, model.tokenizer, label, label_to_index, args.graph_representation, eos=args.eos_usage) for graph, label in tqdm(zip(graphs[split], labels[split]), total=len(labels[split]))] for split in ['train', 'test', 'eval']}
             logging.info('train epoch')
         train_loss, train_accuracy = run_train_epoch(model=model, data=data['train'], criterion=criterion, optimizer=optimizer, batch_size=args.train_batch_size, gradient_accumulation_steps=args.gradient_accumulation_steps, device=args.device)
         logging.info(f'train - {epoch = } # {train_loss = :.2f} # {train_accuracy = :.2f}')
 
         # get dev scores
- #       dev_loss, dev_accuracy = run_eval_epoch(model=model, data=data['dev'], criterion=criterion, batch_size=args.eval_batch_size, device=args.device)
- #       logging.info(f'dev   - {epoch = } # {dev_loss = :.2f} # {dev_accuracy = :.2f}')
+        eval_loss, eval_accuracy = run_eval_epoch(model=model, data=data['eval'], criterion=criterion, batch_size=args.eval_batch_size, device=args.device)
+        logging.info(f'dev   - {epoch = } # {eval_loss = :.2f} # {eval_accuracy = :.2f}')
 
         # get test scores
- #       test_loss, test_accuracy = run_eval_epoch(model=model, data=data['test'], criterion=criterion, batch_size=args.eval_batch_size, device=args.device)
- #       logging.info(f'test  - {epoch = } # {test_loss = :.2f} # {test_accuracy = :.2f}')
+        test_loss, test_accuracy = run_eval_epoch(model=model, data=data['test'], criterion=criterion, batch_size=args.eval_batch_size, device=args.device)
+        logging.info(f'test  - {epoch = } # {test_loss = :.2f} # {test_accuracy = :.2f}')
 
-        if train_loss < best_dev_loss:
+        if eval_loss < best_eval_loss:
             best_epoch = epoch
-            best_dev_accuracy = train_accuracy
-            best_dev_loss = train_loss
-            best_test_accuracy = train_accuracy
-            best_test_loss = train_loss
+            best_eval_accuracy = eval_accuracy
+            best_eval_loss = eval_loss
+            best_eval_accuracy = eval_accuracy
+            best_eval_loss = eval_loss
 
         wandb.log(
             {
@@ -288,7 +328,7 @@ def main(args):
                 "best_epoch": best_epoch,
                 "stopped_early": float(stopped_early),
                 "train/accuracy": train_accuracy, "train/loss": train_loss, 
-                "dev/accuracy": dev_accuracy, "dev/loss": dev_loss, 'dev/best_accuracy': best_dev_accuracy, 'dev/best_loss': best_dev_loss,
+                "eval/accuracy": eval_accuracy, "eval/loss": eval_loss, 'eval/best_accuracy': best_eval_accuracy, 'dev/best_loss': best_eval_loss,
                 "test/accuracy": test_accuracy, "test/loss": test_loss, 'test/best_accuracy': best_test_accuracy, 'test/best_loss': best_test_loss,
             }
         )
@@ -306,7 +346,7 @@ def main(args):
                 "best_epoch": best_epoch,
                 "stopped_early": float(stopped_early),
                 "train/accuracy": train_accuracy, "train/loss": train_loss, 
-                "dev/accuracy": dev_accuracy, "dev/loss": dev_loss, 'dev/best_accuracy': best_dev_accuracy, 'dev/best_loss': best_dev_loss,
+ #               "dev/accuracy": dev_accuracy, "dev/loss": dev_loss, 'dev/best_accuracy': best_dev_accuracy, 'dev/best_loss': best_dev_loss,
                 "test/accuracy": test_accuracy, "test/loss": test_loss, 'test/best_accuracy': best_test_accuracy, 'test/best_loss': best_test_loss,
             }
         )
@@ -320,7 +360,7 @@ if __name__ == "__main__":
     get_args.add_args(parser)
     args = get_args.load_args(parser)
 
-    # args.device = 'cuda' if torch.cuda.is_available() and args.device.startswith('cuda') else 'cpu'
+    args.device = 'cuda' if torch.cuda.is_available() and args.device.startswith('cuda') else 'cpu'
     
     # logging
     root = logging.getLogger()
@@ -340,7 +380,7 @@ if __name__ == "__main__":
     # )
 
     # wandb
-    name = f'{args.wandb_name_prefix}{args.graph_representation:_<4}_{args.params_to_train:_<4}_r={args.radius}_m={args.num_masked}_dsc={args.dataset_construction[0]}_eos={args.eos_usage}_init-additional-buckets-from={args.init_additional_buckets_from}'
+    name = f'GLM_TEST_LOADING'
     wandb_run = wandb.init(
         mode=args.wandb_mode,
         project="GLM-link_prediction-long_train",

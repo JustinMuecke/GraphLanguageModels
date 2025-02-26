@@ -45,13 +45,13 @@ def add_args_shared(parser: ArgumentParser):
     parser.add_argument(
         "--train_batch_size",
         type=int,
-        default=32,
+        default=8,
         help="batch size for training",
     )
     parser.add_argument(
         "--eval_batch_size",
         type=int,
-        default=32,
+        default=8,
         help="batch size for evaluation",
     )
     parser.add_argument(
@@ -63,7 +63,7 @@ def add_args_shared(parser: ArgumentParser):
     parser.add_argument(
         "--device",
         type=str,
-        default="cuda",
+        default="cuda:0",
         help="device",
     )
     parser.add_argument(
