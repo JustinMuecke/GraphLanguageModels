@@ -26,7 +26,7 @@ class GraphT5Classifier(PreTrainedModel):
         self.softmax = nn.Softmax(dim=-1)
 
     @staticmethod
-    def get_config(num_classes:int, modelsize:str="t5-base", num_additional_buckets:int=0, model_max_length:int=512) -> T5Config:
+    def get_config(num_classes:int, modelsize:str="t5-base", num_additional_buckets:int=0, model_max_length:int=4096) -> T5Config:
         config = T5Config.from_pretrained(modelsize)
         config.num_classes = int(num_classes)
         config.modelsize = str(modelsize)

@@ -39,19 +39,19 @@ def add_args_shared(parser: ArgumentParser):
     parser.add_argument(
         "--modelsize",
         type=str,
-        default="t5-small",
+        default="t5-base",
         help="size of the model",
     )
     parser.add_argument(
         "--train_batch_size",
         type=int,
-        default=8,
+        default=1,
         help="batch size for training",
     )
     parser.add_argument(
         "--eval_batch_size",
         type=int,
-        default=8,
+        default=1,
         help="batch size for evaluation",
     )
     parser.add_argument(
@@ -63,7 +63,7 @@ def add_args_shared(parser: ArgumentParser):
     parser.add_argument(
         "--device",
         type=str,
-        default="cuda:0",
+        default="cuda:3",
         help="device",
     )
     parser.add_argument(
@@ -119,7 +119,7 @@ def add_args(parser: ArgumentParser):
     parser.add_argument(
         "--graph_representation",
         type=str,
-        default="lGLM",
+        default="gGLM",
         help="How the graph is represented. 'lGLM' means local graph language model. 'set' means that the graph is represented as a set of triplets (random order) and that the model is a sequence model. 'gGLM' means global GLM, i.e. the same as lGLM but the attention is not sparse and non-neighboring relations and concepts have a PE of the maximum distance. 'list' means that the graph is represented as a list of triplets (alphabetical oder) and that the model is a sequence model.",
     )
     parser.add_argument(
